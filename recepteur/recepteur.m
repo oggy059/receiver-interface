@@ -106,8 +106,11 @@ if strcmp(ext,'.jpg')||strcmp(ext,'.bmp')
         %stem(t,x1)
         plot(t,b)
         
-        val_psnr=psnr(x,b);%calcul psnr
+        val_psnr=PSNR_grayscale(x,b);%calcul psnr
         set(handles.psnr,'String',val_psnr);
+        
+        val_snr= 20*log(norm(x,'fro')/norm(x-b,'fro'));
+        set(handles.snr,'String',val_snr);
     else
         FFT_RED = fft2(b(:,:,1));
         FFT_GREEN = fft2(b(:,:,2));
@@ -129,7 +132,7 @@ if strcmp(ext,'.jpg')||strcmp(ext,'.bmp')
         plot(Imp_GREEN,'g')
         plot(Imp_BLUE,'b');
         
-        val_psnr = PSNRCalc(x,b); %si image couleur
+        val_psnr = PSNR_RGB(x,b); %si image couleur
         set(handles.psnr,'String',val_psnr);
     end;
     
@@ -150,11 +153,6 @@ if strcmp(ext,'.jpg')||strcmp(ext,'.bmp')
     set(handles.Trber,'String',Ber);% affichage de Ber en dB
 
 elseif strcmp(ext,'.mp3')||strcmp(ext,'.wav')
-    
-    file = fopen(filename);
-    x = fread(file);
-    y = randn()*1/100;
-    
     axes(handles.axes3);
     [wave,fs]=audioread(filename);
     t=0:1/fs:(length(wave)-1)/fs; % and get sampling frequency */
@@ -168,11 +166,10 @@ elseif strcmp(ext,'.mp3')||strcmp(ext,'.wav')
     plot(f,wavefft); % plot Fourier Transform */
 
     %Ajouter le bruit dans le son
-    [y1, fs1] = audioread(filename);
+    [y1, ~] = audioread(filename);
     y2 = y1 + 0.01 * randn(size(y1));
     
     [c1x,c1y]=size(y1);
-    [c2x,c2y]=size(y2);
 
     R=c1x;
     C=c1y;
@@ -184,8 +181,8 @@ elseif strcmp(ext,'.mp3')||strcmp(ext,'.wav')
     set(handles.psnr,'String',PSNR);
     
     %afficher le ber
-    x1=dec2bin(abs(y1));%pour rendre l'image émise en binaire
-    b1=dec2bin(abs(y2));%pour rendre l'image reçue en binaire
+    x1 = dec2bin( typecast( single(y1(:)), 'uint8'), 8 ) - '0';%convertir audio original en binaire
+    b1 = dec2bin( typecast( single(y2(:)), 'uint8'), 8 ) - '0';%convertir audio bruite en binaire
     [M1,N1]=size(b1);%definir la taille_ligne et taille_colonne
     bit_error=0;
     for i=1:M1
@@ -199,33 +196,102 @@ elseif strcmp(ext,'.mp3')||strcmp(ext,'.wav')
     Ber=(bit_error/bit_emis);%calcul de taux d'erreurs binaires
     set(handles.Trber,'String',Ber);% affichage de Ber en dB
 
+    val_snr = 10*log10(sum(y1.^2)/ sum(y2.^2));
+    set(handles.snr,'String',val_snr);
     
 elseif strcmp(ext,'.mp4')
-
-    xyloObj = VideoReader(filename);
-    vidHeight = xyloObj.Height;
-    vidWidth = xyloObj.Width;
-    [PSNR] = yuvpsnr(filename,filename,vidWidth,vidHeight,'420','yuv');
-    set(handles.psnr,'String',PSNR);
+    
+    
 elseif strfind(filename,'avi') >0
 
-    xyloObj = VideoReader(filename);
-    vidHeight = xyloObj.Height;
-    vidWidth = xyloObj.Width;
-    [PSNR] = yuvpsnr(filename,filename,vidWidth,vidHeight,'420','yuv');
-    set(handles.psnr,'String',PSNR);
-end;
+    obj = VideoReader(filename);
+    video = read(obj);
+    nFrames = size(video,4);
+    
+    %Le calcul de psnr pour video
+    psnr2 = 0;
+    for i = 1 : nFrames  
+        I(:,:,:,i) = video(:,:,:,i);%Original frame
+        N(:,:,:,i) = imnoise(video(:,:,:,i),'gaussian',0.02);%Noise-added frame
+        drawnow; %Add if we use in loop 
+        errorFrame = I - N;    
+        PSNR = 10*log10(255*255/mean(mean((errorFrame.^2))));
+        val_psnr = 0;
+        for j = 1 : 3;
+            val_psnr = val_psnr+PSNR(:,:,j,i);
+        end;
+        moy_val_psnr = val_psnr/3;%faire la moyenne pour frame RGB
+        psnr2 = psnr2 + moy_val_psnr;
+    end;
+    moy_psnr2 = psnr2/nFrames;%la moyenne de tous les frames
+    set(handles.psnr,'String',moy_psnr2);
+    
+    %Ajouter les frames bruitees dans noise.avi
+    writerObj2 = VideoWriter('noise.avi');
+    open(writerObj2);
+    for i = 1:nFrames
+    writeVideo(writerObj2,N);
+    end;
+    
+    
+    
+    Imp_RED2 = 0;
+    Imp_GREEN2 = 0;
+    Imp_BLUE2 = 0;
+    for i = 1 : nFrames
+        Imp_RED(:,:,i) = N(:,:,1,i);
+        Imp_RED = uint16(Imp_RED);%la valeur limite pour uint 8 est 255
+        Imp_RED2 = Imp_RED2+ Imp_RED(:,:,i);%la somme fait plus que 255
+        Imp_GREEN(:,:,i) = N(:,:,2,i);
+        Imp_GREEN = uint16(Imp_GREEN);
+        Imp_GREEN2 = Imp_GREEN2+Imp_GREEN(:,:,i);
+        Imp_BLUE(:,:,i) = N(:,:,3,i);
+        Imp_BLUE = uint16(Imp_BLUE);
+        Imp_BLUE2 = Imp_BLUE2+Imp_BLUE(:,:,i);
+    end;
+    moy_Imp_RED2 = Imp_RED2/nFrames;
+    moy_Imp_GREEN2 = Imp_GREEN2/nFrames;
+    moy_Imp_BLUE2 = Imp_BLUE2/nFrames;
+    axes(handles.axes3);
+    hold on;
+    plot(moy_Imp_RED2,'r');
+    plot(moy_Imp_GREEN2,'g');
+    plot(moy_Imp_BLUE2,'b');
+    
+    FFT_RED = fft2(moy_Imp_RED2);
+    FFT_GREEN = fft2(moy_Imp_GREEN2);
+    FFT_BLUE = fft2(moy_Imp_BLUE2);
+    %Reponse frequentielle
+    axes(handles.axes2);
+    hold on;
+    plot(FFT_RED,'r');
+    plot(FFT_GREEN,'g');
+    plot(FFT_BLUE,'b');
+    
+    %Ouvrir les fichiers et les transformer en binaire
+    fileID = fopen(filename,'r');
+    A = fread(fileID);
+    fclose(fileID);
+    fileID = fopen('noise.avi','r');
+    B = fread(fileID);
+    fclose(fileID);
+    x1=dec2bin(A);%pour rendre l'image émise en binaire
+    b1=dec2bin(B);%pour rendre l'image reçue en binaire
 
-
-
-
-
-  
-
-
-
-
-
+    [M1,N1]=size(b1);%definir la taille_ligne et taille_colonne
+    bit_error=0;
+    for i=1:M1
+        for k=1:N1
+            if x1(i,k)~=b1(i,k)% si les images sont différentes faire%
+             bit_error=bit_error+1;
+            end
+        end
+    end
+    bit_emis=M1*N1;
+    Ber=(bit_error/bit_emis);%calcul de taux d'erreurs binaires
+    set(handles.Trber,'String',Ber);% affichage de Ber en dB
+end
+    
 function psnr_Callback(hObject, eventdata, handles)
 % hObject    handle to psnr (see GCBO)
 % eventdata  reserved - to be defined in a future version of MATLAB
